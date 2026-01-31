@@ -1,0 +1,89 @@
+#version 450
+
+// Gamma Genesis: γ : ∅ → 𝟙
+// Creates rich proto-unity (𝟙) with multiple harmonic bands
+// Targeting ~100% frequency coverage
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0) uniform GammaParams {
+    float base_frequency;
+    float initial_phase;
+    float amplitude;
+    float envelope_sigma;     // Configurable envelope width
+    uint num_harmonics;       // Number of harmonic overtones
+    float harmonic_decay;     // How fast harmonics decay
+    uint _pad[2];            // Padding to match C++ struct
+} params;
+
+// Empty state input (∅) - memory state
+layout(set = 0, binding = 1, rgba32f) readonly uniform image2D empty_state;
+
+// Proto-identity output (𝟙) - shared thinking state
+layout(set = 0, binding = 2, rgba32f) writeonly uniform image2D proto_identity;
+
+// Gamma filter image (optional, for future use)
+// layout(set = 0, binding = 3, rgba32f) readonly uniform image2D gamma_filter;
+
+const float PI = 3.14159265358979323846;
+const float TAU = 2.0 * PI;
+
+void main() {
+    uvec3 id = gl_GlobalInvocationID;
+    ivec2 dims = imageSize(proto_identity);
+
+    if (id.x >= dims.x || id.y >= dims.y) {
+        return;
+    }
+    
+    // Load empty state (∅) - memory state
+    vec4 empty = imageLoad(empty_state, ivec2(id.xy));
+
+    // Normalized coordinates [-0.5, 0.5]
+    vec2 uv = (vec2(id.xy) - vec2(dims) * 0.5) / vec2(dims);
+
+    // Frequency domain coordinates
+    vec2 freq = uv * params.base_frequency;
+    float freq_mag = length(freq);
+
+    // MULTI-SCALE GAUSSIAN ENVELOPES
+    // Create overlapping envelopes at different scales for broad coverage
+    float envelope = 0.0;
+    for (uint scale = 0; scale < 4; scale++) {
+        float sigma = params.envelope_sigma * (1.0 + float(scale) * 0.3);
+        float scale_weight = 1.0 / (1.0 + float(scale));
+        envelope += exp(-freq_mag * freq_mag / (2.0 * sigma * sigma)) * scale_weight;
+    }
+    envelope /= 4.0;  // Normalize
+
+    // HARMONIC SERIES (fundamental + overtones)
+    // Generate multiple frequency components for rich structure
+    vec2 complex_sum = vec2(0.0);
+
+    for (uint h = 1; h <= params.num_harmonics; h++) {
+        float harmonic_freq = float(h);
+
+        // Harmonic amplitude decays exponentially
+        float harmonic_amp = params.amplitude * pow(params.harmonic_decay, float(h - 1));
+
+        // Phase varies with harmonic number and position
+        float phase = params.initial_phase
+                    + TAU * harmonic_freq * (freq.x + freq.y)
+                    + TAU * float(h) * 0.1;  // Phase offset per harmonic
+
+        // Add this harmonic to the sum
+        complex_sum += harmonic_amp * vec2(cos(phase), sin(phase));
+    }
+
+    // Apply multi-scale envelope
+    complex_sum *= envelope;
+
+    // Encode as RGBA (2 complex channels)
+    vec4 output_value;
+    output_value.rg = complex_sum;                // Channel 1 (real, imag)
+    output_value.ba = complex_sum * 0.7;          // Channel 2 (scaled for diversity)
+
+    // Store in proto-identity (𝟙) - combine with empty state to preserve memory
+    vec4 proto = output_value + empty * 0.1;  // Blend with empty state
+    imageStore(proto_identity, ivec2(id.xy), proto);
+}

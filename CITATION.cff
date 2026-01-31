@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use Genesis in your research, please cite it as below."
+title: "Genesis: Multi-Octave Hierarchical Memory System"
+version: 1.0.0
+date-released: 2026-01-30
+authors:
+  - family-names: "Christopher"
+    given-names: "Richard I"
+repository-code: "https://github.com/NeoTecDigital/Genesis"
+abstract: "A frequency-based memory system that encodes text at multiple octave levels using FFT-based proto-identities with dynamic clustering, achieving O(vocabulary_size) storage efficiency."
+keywords:
+  - machine-learning
+  - neural-networks
+  - frequency-domain
+  - fft
+  - memory-systems
+  - hierarchical-encoding
+license: MIT

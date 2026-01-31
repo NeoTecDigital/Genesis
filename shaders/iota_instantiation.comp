@@ -1,0 +1,73 @@
+#version 450
+
+// Iota Instantiation: ι : 𝟙 → n
+// Modulates proto-unity with instance-specific harmonic coefficients
+// Achieves massive compression: K=256 params (1KB) vs full waveform (4MB)
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// Instance parameters (must match C++ IotaParams struct) - Binding 0 (buffer first per Nova API)
+layout(set = 0, binding = 0) uniform IotaParams {
+    float harmonic_coeffs[10];       // First 10 harmonic coefficients (matches C++)
+    float global_amplitude;          // Overall scaling
+    float frequency_range;           // Frequency space coverage
+    uint _pad;                        // Padding to match C++ struct
+} iota;
+
+// Proto-identity input (𝟙) - shared thinking state - Binding 1 (images after buffers)
+layout(set = 0, binding = 1, rgba32f) readonly uniform image2D proto_identity;
+
+// Instance output (n) - Binding 2
+layout(set = 0, binding = 2, rgba32f) writeonly uniform image2D instance_output;
+
+// Iota filter image (optional, for future use)
+// layout(set = 0, binding = 3, rgba32f) readonly uniform image2D iota_filter;
+
+const float PI = 3.14159265358979323846;
+const float TAU = 2.0 * PI;
+
+void main() {
+    uvec3 id = gl_GlobalInvocationID;
+    ivec2 dims = imageSize(instance_output);
+
+    if (id.x >= dims.x || id.y >= dims.y) {
+        return;
+    }
+
+    // Load proto-identity (𝟙) base structure
+    vec4 proto = imageLoad(proto_identity, ivec2(id.xy));
+
+    // Compute normalized frequency coordinates
+    vec2 uv = (vec2(id.xy) - vec2(dims) * 0.5) / vec2(dims);
+    vec2 freq = uv * iota.frequency_range;
+    float freq_mag = length(freq);
+
+    // Map frequency to harmonic bin (using 10 coefficients)
+    // Map to [0, 1] range, then scale to [0, 9] for 10 bins
+    float bin_index = freq_mag * 10.0;
+    uint bin = uint(clamp(bin_index, 0.0, 9.0));
+
+    // Get instance-specific modulation parameters
+    float amp_mod = iota.harmonic_coeffs[bin];
+    float phase_mod = 0.0;  // No phase shifts in simplified struct
+
+    // Apply amplitude modulation
+    vec2 ch1 = proto.rg * amp_mod;
+    vec2 ch2 = proto.ba * amp_mod;
+
+    // Apply phase rotation (complex multiplication by e^{i*phase_mod})
+    float c = cos(phase_mod);
+    float s = sin(phase_mod);
+    mat2 rotation = mat2(c, -s, s, c);
+
+    ch1 = rotation * ch1;
+    ch2 = rotation * ch2;
+
+    // Apply global scaling
+    ch1 *= iota.global_amplitude;
+    ch2 *= iota.global_amplitude;
+
+    // Output modulated instance
+    vec4 instance = vec4(ch1, ch2);
+    imageStore(instance_output, ivec2(id.xy), instance);
+}

@@ -1,0 +1,21 @@
+# Core dependencies
+numpy>=1.20.0
+scipy>=1.7.0
+pytest>=7.0.0
+
+# Optional GPU acceleration
+# cupy>=11.0.0
+
+# Optional image processing (for DCT codec)
+# opencv-python>=4.5.0
+
+# Optional HDF5 support
+# h5py>=3.0.0
+
+# Optional image export
+# Pillow>=9.0.0
+
+# Development dependencies
+pytest-cov>=3.0.0
+black>=22.0.0
+mypy>=0.950

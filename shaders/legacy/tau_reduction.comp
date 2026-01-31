@@ -1,0 +1,92 @@
+#version 450
+
+// Tau Reduction: τ : n → 𝟙
+// Reduces instance to proto-unity structure
+// This is the inverse/dual of ι (instantiation)
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// Encoder parameters (learnable θ_τ) - Binding 0 (buffer first per Nova API)
+layout(set = 0, binding = 0) uniform TauParams {
+    float normalization_epsilon;     // Avoid division by zero
+    float projection_strength;       // How strongly to project onto template
+    float noise_threshold;           // Filter out low-amplitude noise
+    uint use_template_normalization; // 0=simple, 1=template-aware
+} tau;
+
+// Instance input (n) - Binding 1 (images after buffers)
+layout(set = 0, binding = 1, rgba32f) readonly uniform image2D instance_input;
+
+// Proto-identity template (𝟙) - reference structure - Binding 2
+layout(set = 0, binding = 2, rgba32f) readonly uniform image2D proto_identity_template;
+
+// Proto-identity output (𝟙) - shared thinking state - Binding 3
+layout(set = 0, binding = 3, rgba32f) writeonly uniform image2D proto_identity;
+
+// Tau filter image (optional, for future use)
+// layout(set = 0, binding = 4, rgba32f) readonly uniform image2D tau_filter;
+
+void main() {
+    uvec3 id = gl_GlobalInvocationID;
+    ivec2 dims = imageSize(proto_identity);
+
+    if (id.x >= dims.x || id.y >= dims.y) {
+        return;
+    }
+
+    // Load instance (n) and proto-identity template (𝟙)
+    vec4 instance = imageLoad(instance_input, ivec2(id.xy));
+    vec4 template_val = imageLoad(proto_identity_template, ivec2(id.xy));
+
+    vec4 encoded;
+
+    if (tau.use_template_normalization == 1) {
+        // Template-aware encoding: Extract the structure relative to template
+
+        // Extract amplitude ratios (how much stronger/weaker than template?)
+        vec2 ch1_ratio = vec2(0.0);
+        vec2 ch2_ratio = vec2(0.0);
+
+        float template_mag_ch1 = length(template_val.rg);
+        float template_mag_ch2 = length(template_val.ba);
+
+        if (template_mag_ch1 > tau.normalization_epsilon) {
+            // Normalize instance by template magnitude
+            ch1_ratio = instance.rg / template_mag_ch1;
+        }
+
+        if (template_mag_ch2 > tau.normalization_epsilon) {
+            ch2_ratio = instance.ba / template_mag_ch2;
+        }
+
+        // Apply projection strength (blend between instance and projection)
+        encoded.rg = mix(instance.rg, ch1_ratio * template_mag_ch1, tau.projection_strength);
+        encoded.ba = mix(instance.ba, ch2_ratio * template_mag_ch2, tau.projection_strength);
+
+    } else {
+        // Simple encoding: Direct normalization
+        encoded = instance;
+
+        // Normalize channels independently
+        float mag_ch1 = length(instance.rg);
+        float mag_ch2 = length(instance.ba);
+
+        if (mag_ch1 > tau.normalization_epsilon) {
+            encoded.rg = normalize(instance.rg) * length(template_val.rg);
+        }
+
+        if (mag_ch2 > tau.normalization_epsilon) {
+            encoded.ba = normalize(instance.ba) * length(template_val.ba);
+        }
+    }
+
+    // Noise filtering: Zero out very low amplitudes
+    if (length(encoded.rg) < tau.noise_threshold) {
+        encoded.rg = vec2(0.0);
+    }
+    if (length(encoded.ba) < tau.noise_threshold) {
+        encoded.ba = vec2(0.0);
+    }
+
+    imageStore(proto_identity, ivec2(id.xy), encoded);
+}

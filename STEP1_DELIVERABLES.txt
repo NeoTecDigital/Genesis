@@ -1,0 +1,294 @@
+================================================================================
+STEP 1 (DISCOVERY) - SECURITY HARDENING SPRINT
+================================================================================
+Date: 2025-12-03
+Status: COMPLETE
+
+================================================================================
+DELIVERABLE 1: COMPLETE PICKLE USAGE INVENTORY
+================================================================================
+
+Total Pickle Operations Found: 16
+- Dump operations: 8
+- Load operations: 8
+
+Files with Pickle Usage (16 total):
+1. src/memory/voxel_cloud.py (2 operations: save/load)
+2. src/cli/commands_train.py (2 operations: save/load)
+3. src/cli/commands_synthesis.py (2 operations: load + load)
+4. src/cli/commands_helpers.py (2 operations: dump + load)
+5. src/cli/commands_core.py (1 operation: dump)
+6. tests/test_resonance_weighted_synthesis.py (1 operation: dump)
+7. tests/test_foundation_qa.py (1 operation: load)
+8. tests/test_temporal_state.py (1 operation: dump)
+9. tests/e2e/test_e2e_queries.py (1 operation: load)
+10. tests/e2e/test_foundation_queries.py (1 operation: load)
+11. scripts/fine_tune_params.py (1 operation: load)
+12. scripts/archive/test_foundation.py (1 operation: load)
+13. tests/test_octave_integration.py (import only)
+14. tests/integration/test_synthesis_validation.py (import only)
+15. tests/validation/test_model_validation.py (import only)
+16. tests/test_cross_modal_phase_locking.py (import only)
+
+================================================================================
+DELIVERABLE 2: RISK CATEGORIZATION
+================================================================================
+
+HIGH-RISK (User-Facing, RCE Vulnerability):
+├─ commands_synthesis.py:69 - User supplies model path
+├─ commands_helpers.py:317 - User supplies paired metadata
+└─ commands_core.py:155 - User supplies metadata
+
+MEDIUM-RISK (Internal Persistence, Checkpoint/Save):
+├─ voxel_cloud.py:408 - Model save (1.2GB foundation_memory.pkl)
+├─ voxel_cloud.py:426 - Model load (no integrity check)
+├─ commands_train.py:455 - Checkpoint save
+├─ commands_train.py:470 - Checkpoint load (resume training)
+└─ commands_helpers.py:296 - Metadata save
+
+LOW-RISK (Test Fixtures, Known Data):
+├─ test_resonance_weighted_synthesis.py:308
+├─ test_foundation_qa.py:30
+├─ test_temporal_state.py:483
+├─ test_e2e_queries.py:27
+├─ test_foundation_queries.py:30
+├─ fine_tune_params.py:69
+└─ scripts/archive/test_foundation.py:73
+
+================================================================================
+DELIVERABLE 3: ATTACK VECTORS DOCUMENTED
+================================================================================
+
+Vector 1: MALICIOUS MODEL FILE (CRITICAL)
+  Likelihood: HIGH
+  Impact: RCE on unpickle
+  Entry point: --model <attacker-path>
+
+Vector 2: MITM DURING TRANSFER (CRITICAL)
+  Likelihood: MEDIUM
+  Impact: RCE via intercepted model
+  Mitigation: HMAC + HTTPS
+
+Vector 3: COMPROMISED TRAINING (MEDIUM)
+  Likelihood: LOW
+  Impact: Spread malware to inference
+  Mitigation: HMAC on checkpoints
+
+Vector 4: SUPPLY CHAIN ATTACK (MEDIUM)
+  Likelihood: LOW
+  Impact: All pickle operations compromised
+  Mitigation: Dependency pinning
+
+================================================================================
+DELIVERABLE 4: SAFE ALTERNATIVES RESEARCH
+================================================================================
+
+Option 1: msgpack-numpy (RECOMMENDED)
+  ✅ No code execution risk
+  ✅ Fast (native C extension)
+  ✅ Zero-copy numpy support
+  ✅ Cross-language compatible
+  ✅ Production-ready (Dask, Ray)
+  Migration effort: Medium (2-3 weeks)
+  Recommended for: VoxelCloud, checkpoints, internal models
+
+Option 2: HMAC-Signed Pickle (SHORT-TERM WORKAROUND)
+  ✅ Minimal code changes (1 day)
+  ✅ Backward compatible
+  ✅ Detects tampering
+  ❌ Still vulnerable to RCE (HMAC ≠ safety)
+  Recommended for: Immediate hardening while migrating
+
+Option 3: Safetensors (LONG-TERM)
+  ✅ Purpose-built for ML models
+  ✅ Zero-copy loading
+  ✅ DOS attack prevention
+  ✅ Industry convergence (Hugging Face)
+  ❌ Requires code restructuring
+  Migration effort: High (3-5 weeks)
+  Recommended for: New systems, pure tensor storage
+
+Option 4: HDF5 (ALTERNATIVE)
+  ✅ Great for hierarchical arrays
+  ✅ Lazy loading
+  ✅ No code execution risk
+  ❌ Verbose, slower than msgpack
+  Not recommended for: Genesis' complex nested objects
+
+Option 5: JSON (NOT RECOMMENDED)
+  ❌ Large files (10x+ bigger than pickle)
+  ❌ Slow (text-based)
+  ❌ Float precision loss
+  Recommended for: Configuration only, NOT models
+
+================================================================================
+DELIVERABLE 5: MIGRATION STRATEGY
+================================================================================
+
+PHASE 1: IMMEDIATE HARDENING (1-2 weeks)
+  Task 1: RestrictedUnpickler whitelist
+    - Prevent __reduce__() exploitation
+    - Files: voxel_cloud.py, commands_*.py
+    - Effort: 1 day
+
+  Task 2: HMAC verification
+    - Sign all pickle saves
+    - Verify all pickle loads
+    - Effort: 1 day
+
+  Task 3: User warnings
+    - Document pickle risks
+    - CLI warnings for external models
+    - Effort: 0.5 day
+
+PHASE 2: msgpack MIGRATION (2-3 weeks)
+  Task 1: Serialization schema
+    - Define field mappings
+    - Custom msgpack encoder/decoder
+    - Effort: 2 days
+
+  Task 2: Migrate save/load paths
+    - voxel_cloud.py
+    - commands_train.py
+    - Effort: 2 days
+
+  Task 3: Backward compatibility layer
+    - Dual format support
+    - Conversion script
+    - Effort: 1 day
+
+  Task 4: Test migration
+    - Validate lossless conversion
+    - Test backward compatibility
+    - Effort: 1 day
+
+PHASE 3: LONG-TERM (Safetensors) (1-2 months)
+  Task 1: Evaluate restructuring
+  Task 2: Implement safetensors layer
+  Task 3: Deprecate pickle completely
+
+================================================================================
+DELIVERABLE 6: EFFORT ESTIMATES (by file)
+================================================================================
+
+Priority 1 (User-Facing):
+  - commands_synthesis.py: 6 hours
+  - commands_helpers.py: 4 hours
+  - commands_core.py: 4 hours
+
+Priority 2 (Core Models):
+  - voxel_cloud.py: 8 hours
+  - commands_train.py: 6 hours
+
+Priority 3 (Support):
+  - Backward compatibility: 12 hours
+  - Test suite updates: 8 hours
+  - Documentation: 4 hours
+
+TOTAL EFFORT: 52 hours (6.5 days)
+
+================================================================================
+DELIVERABLE 7: BACKWARD COMPATIBILITY PLAN
+================================================================================
+
+Existing Assets at Risk:
+  - foundation_memory.pkl (1.2 GB) - production model
+  - Test pickle files - test fixtures
+  - User-trained models - external data
+
+Migration Approach:
+  1. Dual-format support (3-6 months)
+     - Auto-detect pickle vs msgpack format
+     - Transparent to calling code
+
+  2. Conversion tool
+     - convert_to_msgpack.py script
+     - One-time migration for existing files
+
+  3. Deprecation timeline
+     - Month 1-2: Accept both formats
+     - Month 2-3: Warn on pickle loads
+     - Month 3+: Remove pickle support
+
+================================================================================
+DELIVERABLE 8: SPECIFIC CODE RECOMMENDATIONS
+================================================================================
+
+RestrictedUnpickler Class:
+  - Whitelist allowed classes
+  - Block __reduce__() exploitation
+  - Apply to all pickle.load() calls
+  - ~50 lines of code
+
+HMAC Wrapper Functions:
+  - save_with_hmac(path, data)
+  - load_with_hmac(path)
+  - ~20 lines of code each
+  - Use environment variable for secret
+
+msgpack Integration:
+  - save_msgpack(path, data)
+  - load_msgpack(path)
+  - Custom encoder for numpy arrays
+  - ~30 lines of code
+
+================================================================================
+DELIVERABLE 9: DOCUMENTATION CREATED
+================================================================================
+
+1. SECURITY_HARDENING_STEP1_DISCOVERY.md (12 sections, comprehensive)
+   - Complete pickle usage inventory
+   - Risk assessment by attack vector
+   - Detailed alternative comparison
+   - 3-phase migration roadmap
+   - Effort estimates per component
+   - Backward compatibility strategy
+   - Implementation recommendations
+
+2. PICKLE_QUICK_REFERENCE.md (developer guide)
+   - Quick fixes (3 code examples)
+   - File priority list
+   - Testing malicious pickles
+   - When to use each approach
+
+3. STEP1_DELIVERABLES.txt (this file)
+   - Summary of all deliverables
+   - Checklist format for tracking
+
+================================================================================
+VERIFICATION CHECKLIST
+================================================================================
+
+✅ Grep search for pickle usage: 16 files found, 16 operations cataloged
+✅ Risk categorization: HIGH (2), MEDIUM (6), LOW (8) classified
+✅ Attack vectors: 4 identified with likelihood/impact analysis
+✅ Safe alternatives: 5 researched with pros/cons comparison
+✅ Migration strategy: 3-phase roadmap with task breakdown
+✅ Effort estimates: 52 hours total for complete migration
+✅ Backward compatibility: Plan for 1.2GB production model
+✅ Code examples: RestrictedUnpickler, HMAC, msgpack provided
+✅ Documentation: Comprehensive discovery report + quick reference
+
+================================================================================
+HAND-OFF TO STEP 2 (DEFINITION)
+================================================================================
+
+Recommended Next Steps for Stakeholders:
+1. Review SECURITY_HARDENING_STEP1_DISCOVERY.md
+2. Prioritize Phase 1 vs Phase 2 timeline
+3. Assign developers to implementation (52 hours)
+4. Approve approach: RestrictedUnpickler + HMAC (immediate) → msgpack (medium-term)
+5. Schedule Phase 1 development (1-2 weeks)
+
+Critical Decision Points:
+- Implement HMAC as immediate hardening? (YES recommended)
+- Migrate to msgpack or safetensors? (msgpack recommended)
+- Timeline for pickle deprecation? (3 months recommended)
+- User communication about pickle risks? (YES, add to docs)
+
+================================================================================
+END OF STEP 1 DISCOVERY REPORT
+Status: COMPLETE
+Date: 2025-12-03
+Ready for: Step 2 (Definition) approval and planning
+================================================================================

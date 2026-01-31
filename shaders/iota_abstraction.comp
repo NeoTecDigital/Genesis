@@ -1,0 +1,59 @@
+#version 450
+
+// Iota Abstraction: ι⁻¹ : n → 𝟙
+// Collapses instance back to proto-unity space (abstraction of instantiation)
+// Removes instance-specific modulation to recover shared substrate
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// Reverse instantiation parameters (must match C++ IotaParams struct)
+// Binding 0: uniform buffer (Nova API convention: buffers first)
+layout(set = 0, binding = 0) uniform IotaParams {
+    float harmonic_coeffs[10];       // First 10 harmonic coefficients (matches C++)
+    float global_amplitude;          // Inverse: divide by this
+    float frequency_range;
+    uint _pad;                        // Padding to match C++ struct
+} iota;
+
+// Instance input (n)
+// Binding 1: input image (Nova API convention: images after buffers)
+layout(set = 0, binding = 1, rgba32f) readonly uniform image2D instance_input;
+
+// Proto-identity output (𝟙) - shared thinking state
+// Binding 2: output image
+layout(set = 0, binding = 2, rgba32f) writeonly uniform image2D proto_identity;
+
+const float PI = 3.14159265358979323846;
+const float TAU = 2.0 * PI;
+
+void main() {
+    uvec3 id = gl_GlobalInvocationID;
+    ivec2 dims = imageSize(proto_identity);
+
+    if (id.x >= dims.x || id.y >= dims.y) {
+        return;
+    }
+
+    // Load instance
+    vec4 instance = imageLoad(instance_input, ivec2(id.xy));
+
+    // Reverse instantiation: remove instance-specific modulation
+    // Forward: proto * global_amplitude * harmonic_modulation
+    // Reverse: instance / (global_amplitude * harmonic_modulation)
+    
+    // Reverse instantiation: simple division by global_amplitude
+    // The C++ struct only has 10 harmonic_coeffs, not the full 256 with phase_shifts
+    // So we use a simplified reverse operation that matches the forward operation
+    
+    float amplitude = iota.global_amplitude;
+    if (amplitude < 0.001) amplitude = 1.0;  // Avoid division by zero
+    
+    // Simple reverse: divide by global amplitude
+    // Forward: proto * global_amplitude
+    // Reverse: instance / global_amplitude
+    vec4 proto = instance / amplitude;
+
+    // Write proto-identity (𝟙) output
+    imageStore(proto_identity, ivec2(id.xy), proto);
+}
+

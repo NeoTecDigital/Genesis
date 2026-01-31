@@ -1,0 +1,374 @@
+# Memory Integration Architecture Diagram
+
+## System Overview
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         MEMORY INTEGRATION LAYER                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌────────────┐         ┌──────────────┐         ┌─────────────┐          │
+│  │   Text     │────────▶│  Unified     │────────▶│   Memory    │          │
+│  │   Input    │         │  Encoder     │         │   Router    │          │
+│  └────────────┘         └──────────────┘         └─────────────┘          │
+│                                │                        │                   │
+│                                │                        │                   │
+│                                ▼                        ▼                   │
+│                         ┌──────────────┐         ┌─────────────┐          │
+│                         │  Multi-Octave│         │  Routing    │          │
+│                         │  Encoder     │         │  Logic      │          │
+│                         └──────────────┘         └─────────────┘          │
+│                                │                        │                   │
+│                                │                   ┌────┴─────┐            │
+│                                │                   │          │            │
+│                                ▼                   ▼          ▼            │
+│                         ┌──────────────┐    ┌──────────┬──────────┐       │
+│                         │ OctaveUnit[] │    │   Core   │Experiential      │
+│                         └──────────────┘    │  Memory  │  Memory  │       │
+│                                             └──────────┴──────────┘       │
+│                                                    │          │            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+## Component Interaction Flow
+
+┌─ Foundation Training Flow ──────────────────────────────────────────────────┐
+│                                                                              │
+│  Text Input                                                                  │
+│      │                                                                       │
+│      ▼                                                                       │
+│  UnifiedEncoder.encode(text, destination='foundation')                      │
+│      │                                                                       │
+│      ├───▶ MultiOctaveEncoder.encode_text_hierarchical()                    │
+│      │         │                                                             │
+│      │         ├── Octave +4 (chars)  → OctaveUnit[]                        │
+│      │         ├── Octave 0 (words)   → OctaveUnit[]                        │
+│      │         └── Octave -2 (phrases)→ OctaveUnit[]                        │
+│      │                                                                       │
+│      ▼                                                                       │
+│  MemoryRouter.route(units, context='foundation')                            │
+│      │                                                                       │
+│      ├───▶ ALL units → Core Memory                                          │
+│      │                                                                       │
+│      ▼                                                                       │
+│  VoxelCloudClustering (similarity wells, resonance tracking)                │
+│      │                                                                       │
+│      ▼                                                                       │
+│  Core Memory Updated                                                        │
+│      │                                                                       │
+│      └─────▶ Stats: {"core_added": N, "experiential_added": 0}             │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌─ Query/Inference Flow ──────────────────────────────────────────────────────┐
+│                                                                              │
+│  Query Text                                                                  │
+│      │                                                                       │
+│      ▼                                                                       │
+│  UnifiedEncoder.encode(query, destination='query')                          │
+│      │                                                                       │
+│      ├───▶ MultiOctaveEncoder.encode_text_hierarchical()                    │
+│      │         │                                                             │
+│      │         ├── Octave +4 (chars)  → OctaveUnit[]                        │
+│      │         └── Octave 0 (words)   → OctaveUnit[]                        │
+│      │                                                                       │
+│      ▼                                                                       │
+│  MemoryRouter.route(units, context='query')                                 │
+│      │                                                                       │
+│      ├───▶ Octave +4, 0 → Experiential Memory                               │
+│      │                                                                       │
+│      ▼                                                                       │
+│  VoxelCloudClustering                                                       │
+│      │                                                                       │
+│      ▼                                                                       │
+│  Experiential Memory Updated                                                │
+│      │                                                                       │
+│      └─────▶ Stats: {"core_added": 0, "experiential_added": M}             │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌─ Cross-Layer Query/Decode Flow ─────────────────────────────────────────────┐
+│                                                                              │
+│  Query Proto-Identity                                                       │
+│      │                                                                       │
+│      ▼                                                                       │
+│  UnifiedDecoder.decode(query_proto, layers='both', octaves=[4,0])           │
+│      │                                                                       │
+│      ├───▶ Query Core Memory (octaves +4, 0)                                │
+│      │         │                                                             │
+│      │         └──▶ Results: [(entry, similarity), ...]                     │
+│      │                                                                       │
+│      ├───▶ Query Experiential Memory (octaves +4, 0)                        │
+│      │         │                                                             │
+│      │         └──▶ Results: [(entry, similarity), ...]                     │
+│      │                                                                       │
+│      ▼                                                                       │
+│  Blend Results (default: core=0.7, experiential=0.3)                        │
+│      │                                                                       │
+│      ├───▶ Apply resonance weighting                                        │
+│      ├───▶ Sort by similarity × resonance × layer_weight                    │
+│      │                                                                       │
+│      ▼                                                                       │
+│  MultiOctaveDecoder.decode_from_memory()                                    │
+│      │                                                                       │
+│      ├───▶ Character-level reconstruction                                   │
+│      └───▶ Word-level context                                               │
+│                                                                              │
+│      ▼                                                                       │
+│  DecodingResult                                                             │
+│      ├─── text: str                                                         │
+│      ├─── source_layers: {"core": N, "experiential": M}                     │
+│      ├─── octaves_used: [4, 0]                                              │
+│      └─── confidence: float                                                 │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌─ Feedback Loop Flow ────────────────────────────────────────────────────────┐
+│                                                                              │
+│  Experiential Proto-Identities (per octave)                                 │
+│      │                                                                       │
+│      ▼                                                                       │
+│  OctaveAwareFeedback.self_reflect_octaves(protos, quaternions)              │
+│      │                                                                       │
+│      ├───▶ For octave +4:                                                   │
+│      │       ├── Query Core Memory (octave +4)                              │
+│      │       ├── Compute coherence_char                                     │
+│      │       └── Classify state_char (IDENTITY/EVOLUTION/PARADOX)           │
+│      │                                                                       │
+│      ├───▶ For octave 0:                                                    │
+│      │       ├── Query Core Memory (octave 0)                               │
+│      │       ├── Compute coherence_word                                     │
+│      │       └── Classify state_word                                        │
+│      │                                                                       │
+│      ▼                                                                       │
+│  Aggregate Coherence = weighted_avg(octave_coherences)                      │
+│      │                                                                       │
+│      ▼                                                                       │
+│  Classify Overall State                                                     │
+│      ├─── coherence >= 0.8 → IDENTITY (ALIGNED)                             │
+│      ├─── coherence <= 0.3 → PARADOX (CONFLICT)                             │
+│      └─── else → EVOLUTION (LEARNING)                                       │
+│      │                                                                       │
+│      ▼                                                                       │
+│  Generate Recommendations                                                   │
+│      ├─── "Character-level coherence low: check vocabulary"                 │
+│      └─── "Word-level aligned: semantic understanding good"                 │
+│                                                                              │
+│      ▼                                                                       │
+│  OctaveFeedbackResult                                                       │
+│      ├─── overall_coherence: 0.72                                           │
+│      ├─── octave_coherences: {4: 0.65, 0: 0.85}                             │
+│      ├─── overall_state: EVOLUTION                                          │
+│      ├─── octave_states: {4: EVOLUTION, 0: IDENTITY}                        │
+│      └─── recommendations: [...]                                            │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌─ Consolidation Flow ────────────────────────────────────────────────────────┐
+│                                                                              │
+│  Trigger: MemoryHierarchy.consolidate(threshold=0.8)                        │
+│      │                                                                       │
+│      ▼                                                                       │
+│  OctaveAwareConsolidation.consolidate_with_octaves()                        │
+│      │                                                                       │
+│      ├───▶ Group Experiential Entries by Octave                             │
+│      │         │                                                             │
+│      │         ├── Octave +4: [entry1, entry2, ...]                         │
+│      │         ├── Octave 0:  [entry3, entry4, ...]                         │
+│      │         └── Octave -2: [entry5, entry6, ...]                         │
+│      │                                                                       │
+│      ├───▶ For Each Octave:                                                 │
+│      │         │                                                             │
+│      │         ├── Filter: resonance_strength >= threshold                  │
+│      │         │     │                                                       │
+│      │         │     └─── High-resonance entries → candidates               │
+│      │         │                                                             │
+│      │         ├── For Each Candidate:                                      │
+│      │         │     │                                                       │
+│      │         │     ├── Search Core (same octave)                          │
+│      │         │     │     │                                                 │
+│      │         │     │     ├── Match found (similarity > 0.9)?              │
+│      │         │     │     │     │                                           │
+│      │         │     │     │     ├── YES: Strengthen core entry             │
+│      │         │     │     │     │       ├── core.resonance += exp.resonance│
+│      │         │     │     │     │       ├── core.units.update(exp.units)   │
+│      │         │     │     │     │       └── Weighted average proto         │
+│      │         │     │     │     │                                           │
+│      │         │     │     │     └── NO: Create new core entry              │
+│      │         │     │     │           ├── Copy proto, freq, metadata       │
+│      │         │     │     │           ├── Preserve octave, resonance       │
+│      │         │     │     │           └── Add to Core Memory               │
+│      │         │     │     │                                                 │
+│      │         │     │     └── Remove from Experiential                     │
+│      │         │     │                                                       │
+│      │         │     └─── Candidate processed                               │
+│      │         │                                                             │
+│      │         └── Octave complete                                          │
+│      │                                                                       │
+│      ▼                                                                       │
+│  Return: consolidated_count                                                 │
+│      │                                                                       │
+│      └─────▶ Core Memory Updated, Experiential Memory Cleared               │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+## Memory Layer Architecture
+
+┌─ VoxelCloud Structure (Core & Experiential) ────────────────────────────────┐
+│                                                                              │
+│  VoxelCloud                                                                  │
+│  ├── entries: List[ProtoIdentityEntry]                                      │
+│  │     │                                                                     │
+│  │     ├── ProtoIdentityEntry                                               │
+│  │     │     ├── proto_identity: (512, 512, 4)                              │
+│  │     │     ├── frequency: (512, 512, 2)                                   │
+│  │     │     ├── octave: int  ◄─── PRESERVED                                │
+│  │     │     ├── resonance_strength: int  ◄─── TRACKED                      │
+│  │     │     ├── metadata:                                                  │
+│  │     │     │     ├── unit: str                                            │
+│  │     │     │     ├── units: Set[str]  ◄─── CLUSTERING                     │
+│  │     │     │     ├── octave: int                                          │
+│  │     │     │     ├── destination_layer: str                               │
+│  │     │     │     └── timestamp: float                                     │
+│  │     │     └── ...                                                        │
+│  │     │                                                                     │
+│  │     └── (more entries...)                                                │
+│  │                                                                           │
+│  ├── spatial_index: Dict[Tuple, List[int]]                                  │
+│  ├── frequency_index: Dict[int, List[int]]                                  │
+│  ├── octave_hierarchy: OctaveHierarchy  ◄─── MULTI-OCTAVE SUPPORT           │
+│  └── ...                                                                     │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+## Octave Hierarchy
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         Octave Levels                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Octave +4 ──▶ Character Level (finest granularity)                        │
+│       ├── Examples: 'a', 'b', 'c', ' ', '.', '!'                           │
+│       ├── Storage: ~82.5% compression (27 protos / 154 occurrences)        │
+│       ├── Routing: Both Core + Experiential (vocabulary building)          │
+│       └── Clustering: similarity ≥ 0.90                                    │
+│                                                                             │
+│  Octave 0 ───▶ Word Level (semantic units)                                 │
+│       ├── Examples: 'the', 'convergence', 'proto-identity'                 │
+│       ├── Storage: ~16.1% compression (26 protos / 31 occurrences)         │
+│       ├── Routing: Both Core + Experiential (semantic grounding)           │
+│       └── Clustering: similarity ≥ 0.90                                    │
+│                                                                             │
+│  Octave -2 ──▶ Short Phrase Level (2-3 words)                              │
+│       ├── Examples: 'the convergence', 'proto-identity system'             │
+│       ├── Routing: Experiential only (query-specific)                      │
+│       └── Clustering: similarity ≥ 0.90                                    │
+│                                                                             │
+│  Octave -4 ──▶ Long Phrase Level (4-6 words)                               │
+│       ├── Examples: 'the convergence of proto-identity system'             │
+│       ├── Routing: Experiential only (query-specific)                      │
+│       └── Clustering: similarity ≥ 0.90                                    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+## Routing Decision Matrix
+
+┌────────────┬──────────────┬────────────────┬───────────────────────────────┐
+│ Octave     │ Context      │ Destination    │ Rationale                     │
+├────────────┼──────────────┼────────────────┼───────────────────────────────┤
+│ +4 (char)  │ foundation   │ Core           │ Build character vocabulary    │
+│ +4 (char)  │ query        │ Experiential   │ Query-specific characters     │
+│ +4 (char)  │ auto         │ Both           │ Default: vocabulary building  │
+├────────────┼──────────────┼────────────────┼───────────────────────────────┤
+│ 0 (word)   │ foundation   │ Core           │ Build semantic vocabulary     │
+│ 0 (word)   │ query        │ Experiential   │ Query-specific words          │
+│ 0 (word)   │ auto         │ Both           │ Default: semantic grounding   │
+├────────────┼──────────────┼────────────────┼───────────────────────────────┤
+│ -2 (short) │ foundation   │ Core           │ Foundation phrase patterns    │
+│ -2 (short) │ query        │ Experiential   │ Query-specific phrases        │
+│ -2 (short) │ auto         │ Experiential   │ Default: query context        │
+├────────────┼──────────────┼────────────────┼───────────────────────────────┤
+│ -4 (long)  │ foundation   │ Core           │ Foundation long patterns      │
+│ -4 (long)  │ query        │ Experiential   │ Query-specific long phrases   │
+│ -4 (long)  │ auto         │ Experiential   │ Default: query context        │
+└────────────┴──────────────┴────────────────┴───────────────────────────────┘
+
+## Cross-Layer Query Blending
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                       Result Blending Strategy                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Core Results (weight = 0.7)                                                │
+│      ├── Entry1: similarity=0.95, resonance=10                             │
+│      ├── Entry2: similarity=0.88, resonance=5                              │
+│      └── Entry3: similarity=0.82, resonance=3                              │
+│                                                                             │
+│  Experiential Results (weight = 0.3)                                        │
+│      ├── Entry4: similarity=0.92, resonance=2                              │
+│      ├── Entry5: similarity=0.85, resonance=1                              │
+│      └── Entry6: similarity=0.80, resonance=1                              │
+│                                                                             │
+│  Blending Formula:                                                          │
+│      final_score = (similarity × resonance × layer_weight)                 │
+│                                                                             │
+│  Sorted Results:                                                            │
+│      1. Entry1 (core):   0.95 × 10 × 0.7 = 6.65                            │
+│      2. Entry4 (exp):    0.92 × 2  × 0.3 = 0.55                            │
+│      3. Entry2 (core):   0.88 × 5  × 0.7 = 3.08                            │
+│      4. Entry5 (exp):    0.85 × 1  × 0.3 = 0.26                            │
+│      5. Entry3 (core):   0.82 × 3  × 0.7 = 1.72                            │
+│      6. Entry6 (exp):    0.80 × 1  × 0.3 = 0.24                            │
+│                                                                             │
+│  Reconstruction uses top N results (default: 10 per octave)                │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+## Data Flow Summary
+
+TEXT INPUT
+    │
+    ▼
+[UnifiedEncoder] ──────────────────────────────────────┐
+    │                                                   │
+    ├─▶ [MultiOctaveEncoder]                           │
+    │        │                                          │
+    │        ├─▶ Octave +4 (chars)                     │
+    │        ├─▶ Octave 0 (words)                      │
+    │        └─▶ Octave -2/-4 (phrases)                │
+    │                                                   │
+    ▼                                                   │
+[MemoryRouter] ◀───────────────────────────────────────┘
+    │
+    ├─▶ [Core Memory] ◀──────────┐
+    │                             │
+    └─▶ [Experiential Memory]    │
+             │                    │
+             ▼                    │
+        [Feedback Loop]           │
+             │                    │
+             ├─▶ Coherence        │
+             └─▶ State            │
+                  │                │
+                  ▼                │
+             [Consolidation] ──────┘
+
+QUERY PROTO
+    │
+    ▼
+[UnifiedDecoder]
+    │
+    ├─▶ Query [Core Memory]
+    │        │
+    │        └─▶ Results (weight=0.7)
+    │
+    ├─▶ Query [Experiential Memory]
+    │        │
+    │        └─▶ Results (weight=0.3)
+    │
+    ▼
+[Blend & Reconstruct]
+    │
+    ▼
+TEXT OUTPUT + METADATA
+
+═══════════════════════════════════════════════════════════════════════════════
+End of Architecture Diagram
+═══════════════════════════════════════════════════════════════════════════════

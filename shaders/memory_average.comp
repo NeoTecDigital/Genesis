@@ -1,0 +1,57 @@
+#version 450
+
+// Memory Cluster Averaging Shader
+// Averages multiple proto-identities from memory pool to form new coherent proto-identity
+// Uses weighted average based on coherence scores
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// Memory pool images (we'll bind multiple images or use array texture)
+// For now, we'll process one memory at a time and accumulate
+layout(set = 0, binding = 0, rgba32f) readonly uniform image2D memory_image;
+
+// Coherence weight for this memory
+layout(set = 0, binding = 1) uniform CoherenceWeight {
+    float weight;  // Normalized coherence weight (0-1)
+} coherence;
+
+// Accumulator buffer (working buffer as output)
+layout(set = 0, binding = 2, rgba32f) uniform image2D accumulator;
+
+// Total weight accumulator (for normalization)
+layout(set = 0, binding = 3) coherent restrict buffer WeightBuffer {
+    float total_weight;
+};
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 img_size = imageSize(memory_image);
+    
+    if (coord.x >= img_size.x || coord.y >= img_size.y) {
+        return;
+    }
+    
+    // Load memory pixel
+    vec4 memory_pixel = imageLoad(memory_image, coord);
+    
+    // Weighted contribution
+    vec4 weighted_pixel = memory_pixel * coherence.weight;
+    
+    // Atomic add to accumulator (weighted sum)
+    // Note: imageAtomicAdd requires integer images, so we'll use a different approach
+    // We'll accumulate in a separate pass or use shared memory
+    
+    // For now, we'll use imageStore with proper synchronization
+    // The caller will handle multiple passes for averaging
+    vec4 current = imageLoad(accumulator, coord);
+    vec4 updated = current + weighted_pixel;
+    imageStore(accumulator, coord, updated);
+    
+    // Accumulate total weight (once per invocation, but we only need it once total)
+    // Use atomic add on first thread
+    if (coord.x == 0 && coord.y == 0) {
+        atomicAdd(total_weight, coherence.weight);
+    }
+}
+
+

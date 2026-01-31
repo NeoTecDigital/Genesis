@@ -1,0 +1,129 @@
+#version 450
+
+// Epsilon Erasure: ε : 𝟙 → ∞
+// Erases proto-unity to evaluation/infinite space
+// Extracts quality metrics and structural properties for meta-learning
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+// Epsilon parameters (learnable θ_ε)
+layout(set = 0, binding = 0) uniform EpsilonParams {
+    float energy_weight;           // Weight for energy metric
+    float coherence_weight;        // Weight for phase coherence
+    float sparsity_weight;         // Weight for sparsity metric
+    float quality_weight;          // Weight for overall quality
+    uint reduction_factor;         // Spatial reduction (e.g., 8 = 512→64)
+    float coherence_threshold;     // Threshold for coherence detection
+} epsilon;
+
+// Proto-identity input (𝟙) - shared thinking state
+layout(set = 0, binding = 1, rgba32f) readonly uniform image2D proto_identity;
+
+// Infinity state output (∞) - evaluation memory
+// Channels encode: R=energy, G=coherence, B=sparsity, A=quality
+layout(set = 0, binding = 2, rgba32f) writeonly uniform image2D infinity_state;
+
+// Epsilon filter image (optional, for future use)
+// layout(set = 0, binding = 3, rgba32f) readonly uniform image2D epsilon_filter;
+
+const float PI = 3.14159265358979323846;
+
+void main() {
+    uvec3 id = gl_GlobalInvocationID;
+    ivec2 eval_dims = imageSize(infinity_state);
+
+    if (id.x >= eval_dims.x || id.y >= eval_dims.y) {
+        return;
+    }
+
+    // This output pixel aggregates an NxN region of the input
+    uint N = epsilon.reduction_factor;
+    ivec2 region_start = ivec2(id.xy) * int(N);
+
+    // Accumulate statistics over the region
+    float total_energy = 0.0;
+    float total_coherence = 0.0;
+    float nonzero_count = 0.0;
+    float total_pixels = float(N * N);
+
+    vec2 mean_ch1 = vec2(0.0);
+    vec2 mean_ch2 = vec2(0.0);
+
+    // First pass: compute means and energy
+    for (uint dy = 0; dy < N; dy++) {
+        for (uint dx = 0; dx < N; dx++) {
+            ivec2 pos = region_start + ivec2(dx, dy);
+            vec4 pixel = imageLoad(proto_identity, pos);
+
+            vec2 ch1 = pixel.rg;
+            vec2 ch2 = pixel.ba;
+
+            mean_ch1 += ch1;
+            mean_ch2 += ch2;
+
+            // Energy = magnitude squared
+            float energy_ch1 = dot(ch1, ch1);
+            float energy_ch2 = dot(ch2, ch2);
+            total_energy += energy_ch1 + energy_ch2;
+
+            // Count non-zero pixels (for sparsity)
+            if (energy_ch1 > 1e-6 || energy_ch2 > 1e-6) {
+                nonzero_count += 1.0;
+            }
+        }
+    }
+
+    mean_ch1 /= total_pixels;
+    mean_ch2 /= total_pixels;
+
+    // Second pass: compute phase coherence (variance from mean phase)
+    float phase_variance = 0.0;
+    for (uint dy = 0; dy < N; dy++) {
+        for (uint dx = 0; dx < N; dx++) {
+            ivec2 pos = region_start + ivec2(dx, dy);
+            vec4 pixel = imageLoad(proto_identity, pos);
+
+            vec2 ch1 = pixel.rg;
+            vec2 ch2 = pixel.ba;
+
+            // Compute phase deviation from mean
+            float mag_ch1 = length(ch1);
+            float mag_ch2 = length(ch2);
+
+            if (mag_ch1 > 1e-6) {
+                vec2 normalized_ch1 = ch1 / mag_ch1;
+                vec2 normalized_mean1 = normalize(mean_ch1 + vec2(1e-10));
+                // Phase difference via dot product
+                float phase_similarity = dot(normalized_ch1, normalized_mean1);
+                phase_variance += (1.0 - phase_similarity);
+            }
+
+            if (mag_ch2 > 1e-6) {
+                vec2 normalized_ch2 = ch2 / mag_ch2;
+                vec2 normalized_mean2 = normalize(mean_ch2 + vec2(1e-10));
+                float phase_similarity = dot(normalized_ch2, normalized_mean2);
+                phase_variance += (1.0 - phase_similarity);
+            }
+        }
+    }
+
+    // Normalize metrics
+    float avg_energy = total_energy / total_pixels;
+    float coherence = 1.0 - (phase_variance / (2.0 * total_pixels)); // Higher = more coherent
+    float sparsity = 1.0 - (nonzero_count / total_pixels);           // Higher = more sparse
+
+    // Quality score: weighted combination
+    // High energy + high coherence + moderate sparsity = high quality proto-unity
+    float quality = epsilon.energy_weight * avg_energy +
+                   epsilon.coherence_weight * max(0.0, coherence) +
+                   epsilon.sparsity_weight * (1.0 - sparsity); // Penalize too much sparsity
+
+    // Store evaluation metrics
+    vec4 evaluation;
+    evaluation.r = avg_energy;
+    evaluation.g = max(0.0, coherence);
+    evaluation.b = sparsity;
+    evaluation.a = quality;
+
+    imageStore(infinity_state, ivec2(id.xy), evaluation);
+}

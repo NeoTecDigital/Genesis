@@ -1,0 +1,65 @@
+#version 450
+
+// Gamma Revelation: γ⁻¹ : 𝟙 → ∅
+// Dissolves proto-unity back to empty space (revelation of genesis)
+// This is the inverse operation of creating proto-unity from empty
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// Reverse genesis parameters (must match C++ GammaParams struct)
+// Binding 0: uniform buffer (Nova API convention: buffers first)
+layout(set = 0, binding = 0) uniform GammaParams {
+    float base_frequency;
+    float initial_phase;
+    float amplitude;
+    float envelope_sigma;
+    uint num_harmonics;
+    float harmonic_decay;
+    uint _pad[2];                    // Padding to match C++ struct
+} params;
+
+// Proto-identity input (𝟙) - shared thinking state
+// Binding 1: input image (Nova API convention: images after buffers)
+layout(set = 0, binding = 1, rgba32f) readonly uniform image2D proto_identity;
+
+// Empty state output (∅) - memory state
+// Binding 2: output image
+layout(set = 0, binding = 2, rgba32f) writeonly uniform image2D empty_state;
+
+const float PI = 3.14159265358979323846;
+
+void main() {
+    uvec3 id = gl_GlobalInvocationID;
+    ivec2 dims = imageSize(empty_state);
+
+    if (id.x >= dims.x || id.y >= dims.y) {
+        return;
+    }
+
+    // Load proto-identity (𝟙)
+    vec4 proto = imageLoad(proto_identity, ivec2(id.xy));
+
+    // Reverse genesis: dissolve proto-unity back to empty
+    // Forward: empty → proto with amplitude and harmonics
+    // Reverse: proto → empty by scaling down
+    
+    // Simple dissolution: scale down by inverse of amplitude
+    // More sophisticated: could use learned dissolution parameters
+    float dissolve_factor = 0.1;  // Could be learned parameter
+    
+    // Alternative: dissolve based on envelope (inverse of genesis envelope)
+    vec2 uv = (vec2(id.xy) - vec2(dims) * 0.5) / vec2(dims);
+    vec2 freq = uv * params.base_frequency;
+    float freq_mag = length(freq);
+    
+    // Inverse envelope (dissolve more at edges, less at center)
+    float envelope = exp(-freq_mag * freq_mag / (2.0 * params.envelope_sigma * params.envelope_sigma));
+    float inverse_envelope = 1.0 - envelope * 0.9;  // Preserve some structure
+    
+    // Apply dissolution
+    vec4 empty = proto * dissolve_factor * inverse_envelope;
+
+    // Write empty state (∅) output
+    imageStore(empty_state, ivec2(id.xy), empty);
+}
+

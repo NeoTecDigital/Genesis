@@ -1,0 +1,24 @@
+#version 450
+
+// Simple image-to-image copy shader
+// Used for copying proto-identities between working buffer and memory pool
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba32f) readonly uniform image2D src_image;
+layout(set = 0, binding = 1, rgba32f) writeonly uniform image2D dst_image;
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    
+    // Get image size from the image itself
+    ivec2 img_size = imageSize(src_image);
+    
+    if (coord.x >= img_size.x || coord.y >= img_size.y) {
+        return;
+    }
+    
+    vec4 pixel = imageLoad(src_image, coord);
+    imageStore(dst_image, coord, pixel);
+}
+

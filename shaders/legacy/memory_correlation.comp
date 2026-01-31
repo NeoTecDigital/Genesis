@@ -1,0 +1,49 @@
+#version 450
+
+// Memory Correlation Shader
+// Correlates working buffer against all proto-identities in memory pool
+// Computes coherence (correlation score) for each memory
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// Working buffer (input to correlate against)
+layout(set = 0, binding = 0, rgba32f) readonly uniform image2D working_buffer;
+
+// Memory pool (array of proto-identities to correlate against)
+// We'll use a single descriptor set and iterate, or use storage buffer
+// For now, we'll correlate against one memory at a time (called multiple times)
+layout(set = 0, binding = 1, rgba32f) readonly uniform image2D memory_image;
+
+// Output: Correlation result (single value stored in buffer)
+// Binding 2: Storage buffer for correlation scores
+layout(set = 0, binding = 2) coherent restrict buffer CorrelationBuffer {
+    float correlation_score;  // L2 distance (lower = more similar)
+    float coherence;          // Normalized coherence (0-1, higher = more coherent)
+    uint memory_index;        // Which memory this correlation is for
+};
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 img_size = imageSize(working_buffer);
+    
+    if (coord.x >= img_size.x || coord.y >= img_size.y) {
+        return;
+    }
+    
+    // Load pixels from both images
+    vec4 working_pixel = imageLoad(working_buffer, coord);
+    vec4 memory_pixel = imageLoad(memory_image, coord);
+    
+    // Compute squared difference (L2 norm component)
+    vec4 diff = working_pixel - memory_pixel;
+    float squared_diff = dot(diff, diff);
+    
+    // Atomic add to accumulate sum of squared differences
+    // Note: This requires atomic operations on floats (may need to use int atomic and convert)
+    // For simplicity, we'll use shared memory reduction
+    
+    // Store per-pixel squared difference in shared memory
+    // Then reduce in a second pass
+}
+
+

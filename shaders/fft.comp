@@ -1,0 +1,124 @@
+#version 450
+
+// FFT compute shader - Cooley-Tukey radix-2 algorithm
+// Supports both forward and inverse transforms for differentiability
+
+layout(local_size_x = 256) in;
+
+// FFT parameters
+layout(set = 0, binding = 0) uniform FFTParams {
+    uint  size;           // Transform size (must be power of 2)
+    uint  log2_size;      // log2(size) for bit reversal
+    uint  direction;      // 0 = forward, 1 = inverse
+    float normalization;  // 1/sqrt(N) for unitary transform
+} fft_params;
+
+// Complex number storage (interleaved real/imaginary)
+layout(set = 0, binding = 1) buffer InputBuffer {
+    float data[];
+} input_buffer;
+
+layout(set = 0, binding = 2) buffer OutputBuffer {
+    float data[];
+} output_buffer;
+
+// Shared memory for workgroup-local FFT computation
+shared vec2 shared_data[512];  // Max 256 complex numbers
+
+const float PI = 3.14159265358979323846;
+const float TAU = 2.0 * PI;
+
+// Bit reversal for FFT reordering
+uint bit_reverse(uint x, uint bits) {
+    uint result = 0;
+    for (uint i = 0; i < bits; i++) {
+        result = (result << 1) | (x & 1);
+        x >>= 1;
+    }
+    return result;
+}
+
+// Complex multiplication: (a + bi) * (c + di)
+vec2 complex_mul(vec2 a, vec2 b) {
+    return vec2(
+        a.x * b.x - a.y * b.y,  // Real part
+        a.x * b.y + a.y * b.x   // Imaginary part
+    );
+}
+
+// Cooley-Tukey butterfly operation
+void butterfly(inout vec2 a, inout vec2 b, vec2 twiddle) {
+    vec2 t = complex_mul(b, twiddle);
+    b = a - t;
+    a = a + t;
+}
+
+void main() {
+    uint tid = gl_LocalInvocationID.x;
+    uint gid = gl_GlobalInvocationID.x;
+    uint wg_size = gl_WorkGroupSize.x;
+
+    // Check bounds
+    if (gid >= fft_params.size) {
+        return;
+    }
+
+    // Load data with bit reversal
+    uint reversed_idx = bit_reverse(gid, fft_params.log2_size);
+    if (reversed_idx < fft_params.size) {
+        vec2 value = vec2(
+            input_buffer.data[reversed_idx * 2],
+            input_buffer.data[reversed_idx * 2 + 1]
+        );
+        shared_data[tid] = value;
+    } else {
+        shared_data[tid] = vec2(0.0, 0.0);
+    }
+
+    barrier();  // Synchronize workgroup
+
+    // FFT stages
+    float direction_sign = (fft_params.direction == 0) ? -1.0 : 1.0;
+
+    for (uint stage = 1; stage <= fft_params.log2_size; stage++) {
+        uint butterfly_size = 1 << stage;
+        uint butterfly_half = butterfly_size >> 1;
+
+        // Compute twiddle factor index
+        uint k = tid & (butterfly_half - 1);
+        uint twiddle_idx = k * (fft_params.size >> stage);
+
+        // Compute twiddle factor W_N^k
+        float angle = direction_sign * TAU * float(twiddle_idx) / float(fft_params.size);
+        vec2 twiddle = vec2(cos(angle), sin(angle));
+
+        // Determine butterfly pair indices
+        uint butterfly_group = tid >> (stage - 1);
+        uint i = (butterfly_group << stage) + k;
+        uint j = i + butterfly_half;
+
+        // Only process if indices are within bounds
+        if (j < wg_size && j < fft_params.size) {
+            // Perform butterfly operation
+            butterfly(shared_data[i], shared_data[j], twiddle);
+        }
+
+        barrier();  // Synchronize after each stage
+    }
+
+    // Apply normalization for inverse transform
+    vec2 result = shared_data[tid];
+    if (fft_params.direction == 1) {
+        result *= fft_params.normalization;
+    }
+
+    // Write output
+    if (gid < fft_params.size) {
+        output_buffer.data[gid * 2] = result.x;
+        output_buffer.data[gid * 2 + 1] = result.y;
+    }
+}
+
+// Entry point for differentiable FFT (preserves gradients)
+// The FFT operation is inherently differentiable as it's a linear transformation
+// Gradients flow through via the same transform (with conjugate for inverse)

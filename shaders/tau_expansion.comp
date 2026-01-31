@@ -1,0 +1,60 @@
+#version 450
+
+// Tau Expansion: τ⁻¹ : 𝟙 → n
+// Expands proto-unity to instance space (inverse of reduction)
+// This is the inverse operation of reduction
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// Decoder parameters (learnable θ_τ⁻¹, using same structure as encoder for now)
+// Binding 0: uniform buffer (Nova API convention: buffers first)
+layout(set = 0, binding = 0) uniform TauParams {
+    float normalization_epsilon;
+    float projection_strength;       // Inverse: expand by 1/projection_strength
+    float noise_threshold;
+    uint use_template_normalization;
+} tau;
+
+// Proto-identity input (𝟙) - shared thinking state
+// Binding 1: input image (Nova API convention: images after buffers)
+layout(set = 0, binding = 1, rgba32f) readonly uniform image2D proto_identity;
+
+// Instance output (n)
+// Binding 2: output image
+layout(set = 0, binding = 2, rgba32f) writeonly uniform image2D instance_output;
+
+void main() {
+    uvec3 id = gl_GlobalInvocationID;
+    ivec2 dims = imageSize(instance_output);
+
+    if (id.x >= dims.x || id.y >= dims.y) {
+        return;
+    }
+
+    // Load proto-identity (𝟙)
+    vec4 proto = imageLoad(proto_identity, ivec2(id.xy));
+
+    // Reverse encoding: expand proto-unity back to instance
+    // If encoding was: instance * strength + proto * (1 - strength)
+    // Then decoding is: (proto - proto * (1 - strength)) / strength
+    // Simplified: proto / strength
+    
+    float strength = tau.projection_strength;
+    if (strength < 0.001) strength = 1.0;  // Avoid division by zero
+    
+    vec4 instance = proto / strength;
+
+    // Apply noise threshold (reverse operation)
+    // In forward, we filtered noise; in reverse, we preserve structure
+    // Only filter if noise_threshold is explicitly set (> 0)
+    if (tau.noise_threshold > 0.0) {
+        float mag = length(instance.rg);
+        if (mag < tau.noise_threshold) {
+            instance = vec4(0.0);
+        }
+    }
+
+    // Write instance output
+    imageStore(instance_output, ivec2(id.xy), instance);
+}
+

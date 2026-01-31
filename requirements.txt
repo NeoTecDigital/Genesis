@@ -1,0 +1,7 @@
+numpy
+bayesian-optimization
+scikit-image
+pytest
+fastapi
+uvicorn
+matplotlib
